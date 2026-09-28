@@ -188,18 +188,35 @@
   }
 
   async function account(name) {
-    const [accountResult, historyResult] = await Promise.all([
+    const [accountResult, historyResult, tokenResult, uniqResult] = await Promise.all([
       chainPost('/v1/chain/get_account', {account_name: name}),
-      accountActions(name)
+      accountActions(name),
+      safePart(
+        () => hyperionGet('/v2/state/get_tokens?account=' + encodeURIComponent(name)),
+        {data: {tokens: []}, endpoint: null}
+      ),
+      safePart(
+        () => chainPost('/v1/chain/get_table_rows', {
+          json: true,
+          code: 'eosio.nft.ft',
+          scope: name,
+          table: 'token.b',
+          limit: 100
+        }),
+        {data: {rows: [], more: false}, endpoint: null}
+      )
     ]);
     return {
       data: {
         account: accountResult.data,
         actions: historyResult.data?.actions || [],
-        actions_warning: historyResult.data?.warning || null
+        actions_warning: historyResult.data?.warning || null,
+        tokens: tokenResult.data?.tokens || [],
+        uniqs: uniqResult.data?.rows || [],
+        uniq_more: Boolean(uniqResult.data?.more)
       },
       endpoint: accountResult.endpoint,
-      hyperionEndpoint: historyResult.endpoint
+      hyperionEndpoint: historyResult.endpoint || tokenResult.endpoint
     };
   }
 
@@ -244,12 +261,29 @@
   }
 
   async function recentTransfers(limit = 15) {
-    return hyperionGet('/v2/history/get_actions?act.account=eosio.token&act.name=transfer&limit=' +
-      Math.max(1, Math.min(Number(limit) || 15, 30)) + '&sort=desc');
+    const result = await hyperionGet('/v2/history/get_transfers?contract=eosio.token&symbol=UOS&limit=' +
+      Math.max(1, Math.min(Number(limit) || 15, 30)));
+    const actions = (result.data?.actions || []).map(item => {
+      const act = item.act || item.action_trace?.act || {};
+      const data = act.data || {};
+      const quantity = data.quantity || (
+        data.amount !== undefined && data.symbol
+          ? String(data.amount) + ' ' + String(data.symbol)
+          : null
+      );
+      return {
+        ...item,
+        act: {
+          ...act,
+          data: quantity ? {...data, quantity} : data
+        }
+      };
+    });
+    return {...result, data: {...result.data, actions}};
   }
 
   async function recentUniqActivity(limit = 15) {
-    return hyperionGet('/v2/history/get_actions?act.account=eosio.nft.ft&limit=' +
+    return hyperionGet('/v2/history/get_actions?account=eosio.nft.ft&filter=eosio.nft.ft:*&noBinary=true&limit=' +
       Math.max(1, Math.min(Number(limit) || 15, 30)) + '&sort=desc');
   }
 

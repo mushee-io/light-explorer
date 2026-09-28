@@ -29,4 +29,7 @@ jobs:
           test ! -d api
           grep -q 'direct-api.js' index.html
           grep -q 'app.js' index.html
+          grep -q 'class="brand-logo"' index.html
+          ! grep -q 'ultra-logo.jpg' index.html
+          ! grep -Fq '\\n' index.html
           grep -q '"framework": null' vercel.json

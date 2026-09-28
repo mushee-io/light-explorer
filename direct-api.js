@@ -13,39 +13,113 @@
     'https://test.ultra.eosusa.io'
   ];
 
+  const CACHE_PREFIX = 'ultra-lite:v2:';
+  const PREF_CHAIN = 'ultra-lite:preferred-chain';
+  const PREF_HYPERION = 'ultra-lite:preferred-hyperion';
+  const MAX_STALE_MS = 6 * 60 * 60 * 1000;
+  const healthState = new Map();
+
   const reply = (body, status = 200) => new Response(JSON.stringify(body), {
     status,
-    headers: {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store'
+    }
   });
 
-  async function request(url, options = {}, timeout = 9000) {
+  function safeGet(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  }
+  function safeSet(key, value) {
+    try { localStorage.setItem(key, value); } catch {}
+  }
+
+  function cacheKey(url) {
+    return CACHE_PREFIX + url.pathname + '?' + [...url.searchParams.entries()]
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([k,v]) => k + '=' + v)
+      .join('&');
+  }
+
+  function readCache(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const item = JSON.parse(raw);
+      if (!item?.savedAt || Date.now() - item.savedAt > MAX_STALE_MS) return null;
+      return item;
+    } catch { return null; }
+  }
+
+  function writeCache(key, body) {
+    try {
+      localStorage.setItem(key, JSON.stringify({savedAt: Date.now(), body}));
+    } catch {}
+  }
+
+  function ordered(endpoints, prefKey) {
+    const preferred = safeGet(prefKey);
+    if (!preferred || !endpoints.includes(preferred)) return [...endpoints];
+    return [preferred, ...endpoints.filter(x => x !== preferred)];
+  }
+
+  async function request(url, options = {}, timeout = 7000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
+    const started = performance.now();
     try {
-      const r = await nativeFetch(url, {
+      const response = await nativeFetch(url, {
         ...options,
         mode: 'cors',
+        cache: 'no-store',
         signal: controller.signal,
-        headers: {Accept: 'application/json', ...(options.body ? {'Content-Type':'application/json'} : {}), ...(options.headers || {})}
+        headers: {
+          Accept: 'application/json',
+          ...(options.body ? {'Content-Type': 'application/json'} : {}),
+          ...(options.headers || {})
+        }
       });
-      const text = await r.text();
+      const text = await response.text();
       let data;
-      try { data = text ? JSON.parse(text) : null; } catch { data = {raw:text}; }
-      if (!r.ok) throw new Error(data?.error?.what || data?.message || `HTTP ${r.status}`);
-      return data;
+      try { data = text ? JSON.parse(text) : null; }
+      catch { data = {raw: text}; }
+      if (!response.ok) {
+        const error = new Error(data?.error?.what || data?.message || 'HTTP ' + response.status);
+        error.status = response.status;
+        throw error;
+      }
+      return {data, latencyMs: Math.max(1, Math.round(performance.now() - started))};
     } finally {
       clearTimeout(timer);
     }
   }
 
-  async function failover(endpoints, build) {
+  async function failover(endpoints, prefKey, build) {
     const failures = [];
-    for (const endpoint of endpoints) {
+    for (const endpoint of ordered(endpoints, prefKey)) {
+      const started = performance.now();
       try {
         const {path, options} = build(endpoint);
-        return {data: await request(`${endpoint}${path}`, options), endpoint};
-      } catch (e) {
-        failures.push({endpoint, message:e.message});
+        const result = await request(endpoint + path, options);
+        const stat = {
+          endpoint,
+          ok: true,
+          latencyMs: result.latencyMs,
+          checkedAt: new Date().toISOString()
+        };
+        healthState.set(endpoint, stat);
+        safeSet(prefKey, endpoint);
+        return {data: result.data, endpoint, latencyMs: result.latencyMs};
+      } catch (error) {
+        const stat = {
+          endpoint,
+          ok: false,
+          latencyMs: Math.max(1, Math.round(performance.now() - started)),
+          checkedAt: new Date().toISOString(),
+          error: error.message
+        };
+        healthState.set(endpoint, stat);
+        failures.push({endpoint, message: error.message});
       }
     }
     const error = new Error('All Ultra public endpoints failed for this request.');
@@ -53,17 +127,28 @@
     throw error;
   }
 
-  const chainGet = path => failover(CHAIN, () => ({path, options:{method:'GET'}}));
-  const chainPost = (path, body) => failover(CHAIN, () => ({path, options:{method:'POST', body:JSON.stringify(body)}}));
-  const hyperionGet = path => failover(HYPERION, () => ({path, options:{method:'GET'}}));
+  const chainGet = path =>
+    failover(CHAIN, PREF_CHAIN, () => ({path, options: {method: 'GET'}}));
+
+  const chainPost = (path, body) =>
+    failover(CHAIN, PREF_CHAIN, () => ({
+      path,
+      options: {method: 'POST', body: JSON.stringify(body)}
+    }));
+
+  const hyperionGet = path =>
+    failover(HYPERION, PREF_HYPERION, () => ({path, options: {method: 'GET'}}));
 
   async function info() {
-    const r = await chainGet('/v1/chain/get_info');
-    return {...r, verifiedTestnet:r.data?.chain_id === CHAIN_ID};
+    const result = await chainGet('/v1/chain/get_info');
+    return {
+      ...result,
+      verifiedTestnet: result.data?.chain_id === CHAIN_ID
+    };
   }
 
-  function txList(block) {
-    return (block?.transactions || []).map((entry,index) => {
+  function normalizeTransactions(block) {
+    return (block?.transactions || []).map((entry, index) => {
       const trx = entry?.trx;
       return {
         index,
@@ -76,73 +161,275 @@
   }
 
   async function block(id) {
-    const r = await chainPost('/v1/chain/get_block', {block_num_or_id:String(id)});
-    return {...r, data:{...r.data, transactions_normalized:txList(r.data)}};
-  }
-
-  const transaction = id => hyperionGet(`/v2/history/get_transaction?id=${encodeURIComponent(id)}`);
-
-  async function actions(name) {
-    try { return await hyperionGet(`/v2/history/get_actions?account=${encodeURIComponent(name)}&limit=25&sort=desc`); }
-    catch { return {data:{actions:[], warning:'Recent action history is temporarily unavailable.'}, endpoint:null}; }
-  }
-
-  async function account(name) {
-    const [a,h] = await Promise.all([
-      chainPost('/v1/chain/get_account', {account_name:name}),
-      actions(name)
-    ]);
+    const result = await chainPost('/v1/chain/get_block', {block_num_or_id: String(id)});
     return {
-      data:{account:a.data, actions:h.data?.actions || [], actions_warning:h.data?.warning || null},
-      endpoint:a.endpoint,
-      hyperionEndpoint:h.endpoint
+      ...result,
+      data: {
+        ...result.data,
+        transactions_normalized: normalizeTransactions(result.data)
+      }
     };
   }
 
-  async function recent(count=8) {
-    const i = await info();
-    const head = Number(i.data?.head_block_num || 0);
-    const total = Math.max(1, Math.min(Number(count)||8, 10));
-    const nums = Array.from({length:total},(_,x)=>head-x).filter(Boolean);
+  async function transaction(id) {
+    return hyperionGet('/v2/history/get_transaction?id=' + encodeURIComponent(id));
+  }
+
+  async function accountActions(name, limit = 25) {
+    try {
+      return await hyperionGet('/v2/history/get_actions?account=' +
+        encodeURIComponent(name) + '&limit=' + limit + '&sort=desc');
+    } catch {
+      return {
+        data: {actions: [], warning: 'Recent action history is temporarily unavailable.'},
+        endpoint: null
+      };
+    }
+  }
+
+  async function account(name) {
+    const [accountResult, historyResult] = await Promise.all([
+      chainPost('/v1/chain/get_account', {account_name: name}),
+      accountActions(name)
+    ]);
+    return {
+      data: {
+        account: accountResult.data,
+        actions: historyResult.data?.actions || [],
+        actions_warning: historyResult.data?.warning || null
+      },
+      endpoint: accountResult.endpoint,
+      hyperionEndpoint: historyResult.endpoint
+    };
+  }
+
+  async function recent(count = 8) {
+    const infoResult = await info();
+    const head = Number(infoResult.data?.head_block_num || 0);
+    const wanted = Math.max(1, Math.min(Number(count) || 8, 10));
+    const nums = Array.from({length: wanted}, (_, i) => head - i).filter(n => n > 0);
     const rows = await Promise.all(nums.map(async n => {
       try {
-        const b = await block(n);
-        return {block_num:b.data?.block_num || n, id:b.data?.id, timestamp:b.data?.timestamp, producer:b.data?.producer, transaction_count:b.data?.transactions?.length || 0};
+        const result = await block(n);
+        return {
+          block_num: result.data?.block_num || n,
+          id: result.data?.id,
+          timestamp: result.data?.timestamp,
+          producer: result.data?.producer,
+          transaction_count: result.data?.transactions?.length || 0
+        };
       } catch { return null; }
     }));
-    return {data:{info:i.data, blocks:rows.filter(Boolean)}, endpoint:i.endpoint, verifiedTestnet:i.verifiedTestnet};
+    return {
+      data: {info: infoResult.data, blocks: rows.filter(Boolean)},
+      endpoint: infoResult.endpoint,
+      verifiedTestnet: infoResult.verifiedTestnet
+    };
+  }
+
+  async function producers() {
+    const result = await chainPost('/v1/chain/get_producers', {
+      json: true,
+      lower_bound: '',
+      limit: 50
+    });
+    return {
+      ...result,
+      data: {
+        rows: result.data?.rows || [],
+        total_producer_vote_weight: result.data?.total_producer_vote_weight ?? null,
+        more: result.data?.more ?? ''
+      }
+    };
+  }
+
+  async function recentTransfers(limit = 15) {
+    return hyperionGet('/v2/history/get_actions?act.account=eosio.token&act.name=transfer&limit=' +
+      Math.max(1, Math.min(Number(limit) || 15, 30)) + '&sort=desc');
+  }
+
+  async function recentUniqActivity(limit = 15) {
+    return hyperionGet('/v2/history/get_actions?act.account=eosio.nft.ft&limit=' +
+      Math.max(1, Math.min(Number(limit) || 15, 30)) + '&sort=desc');
+  }
+
+  async function probeChain(endpoint) {
+    const started = performance.now();
+    try {
+      const result = await request(endpoint + '/v1/chain/get_info', {method: 'GET'}, 4500);
+      return {
+        endpoint,
+        kind: 'chain',
+        ok: result.data?.chain_id === CHAIN_ID,
+        latencyMs: result.latencyMs,
+        headBlock: result.data?.head_block_num ?? null,
+        checkedAt: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        endpoint,
+        kind: 'chain',
+        ok: false,
+        latencyMs: Math.max(1, Math.round(performance.now() - started)),
+        error: error.message,
+        checkedAt: new Date().toISOString()
+      };
+    }
+  }
+
+  async function probeHyperion(endpoint) {
+    const started = performance.now();
+    try {
+      let result;
+      try {
+        result = await request(endpoint + '/v2/health', {method: 'GET'}, 4500);
+      } catch {
+        result = await request(endpoint + '/v2/history/get_actions?limit=1&sort=desc', {method: 'GET'}, 4500);
+      }
+      return {
+        endpoint,
+        kind: 'hyperion',
+        ok: true,
+        latencyMs: result.latencyMs,
+        checkedAt: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        endpoint,
+        kind: 'hyperion',
+        ok: false,
+        latencyMs: Math.max(1, Math.round(performance.now() - started)),
+        error: error.message,
+        checkedAt: new Date().toISOString()
+      };
+    }
+  }
+
+  async function health() {
+    const [chain, hyperion] = await Promise.all([
+      Promise.all(CHAIN.map(probeChain)),
+      Promise.all(HYPERION.map(probeHyperion))
+    ]);
+    chain.forEach(x => healthState.set(x.endpoint, x));
+    hyperion.forEach(x => healthState.set(x.endpoint, x));
+    return {
+      data: {
+        chain,
+        hyperion,
+        chainHealthy: chain.filter(x => x.ok).length,
+        hyperionHealthy: hyperion.filter(x => x.ok).length,
+        checkedAt: new Date().toISOString()
+      },
+      endpoint: safeGet(PREF_CHAIN) || chain.find(x => x.ok)?.endpoint || null,
+      hyperionEndpoint: safeGet(PREF_HYPERION) || hyperion.find(x => x.ok)?.endpoint || null
+    };
+  }
+
+  async function safePart(fn, fallback) {
+    try { return await fn(); }
+    catch (error) { return {...fallback, error: error.message}; }
+  }
+
+  async function dashboard() {
+    const [recentResult, healthResult, producerResult, transferResult, uniqResult] = await Promise.all([
+      recent(8),
+      health(),
+      safePart(producers, {data: {rows: []}, endpoint: null}),
+      safePart(() => recentTransfers(12), {data: {actions: []}, endpoint: null}),
+      safePart(() => recentUniqActivity(12), {data: {actions: []}, endpoint: null})
+    ]);
+    return {
+      data: {
+        info: recentResult.data?.info || {},
+        blocks: recentResult.data?.blocks || [],
+        health: healthResult.data,
+        producers: producerResult.data?.rows || [],
+        transfers: transferResult.data?.actions || [],
+        uniqActivity: uniqResult.data?.actions || []
+      },
+      endpoint: recentResult.endpoint,
+      hyperionEndpoint: transferResult.endpoint || uniqResult.endpoint || healthResult.hyperionEndpoint,
+      verifiedTestnet: recentResult.verifiedTestnet
+    };
   }
 
   async function search(q) {
     q = String(q || '').trim();
     if (!q) throw new Error('Enter an account, transaction ID, or block number.');
-    if (/^\d+$/.test(q)) return {type:'block', ...(await block(q))};
-    if (/^[a-z1-5.]{1,12}$/.test(q)) return {type:'account', ...(await account(q))};
+    if (/^\d+$/.test(q)) return {type: 'block', ...(await block(q))};
+    if (/^[a-z1-5.]{1,12}$/.test(q)) return {type: 'account', ...(await account(q))};
     if (/^[0-9a-fA-F]{64}$/.test(q)) {
-      try { return {type:'transaction', ...(await transaction(q))}; }
-      catch { return {type:'block', ...(await block(q))}; }
+      try { return {type: 'transaction', ...(await transaction(q))}; }
+      catch { return {type: 'block', ...(await block(q))}; }
     }
     throw new Error('That does not look like a valid Ultra account, transaction/block ID, or block number.');
   }
 
+  async function dispatch(url) {
+    const mode = url.searchParams.get('mode') || 'info';
+    let result;
+    if (mode === 'info') result = await info();
+    else if (mode === 'recent') result = await recent(url.searchParams.get('count'));
+    else if (mode === 'dashboard') result = await dashboard();
+    else if (mode === 'health') result = await health();
+    else if (mode === 'producers') result = await producers();
+    else if (mode === 'transfers') result = await recentTransfers(url.searchParams.get('limit'));
+    else if (mode === 'uniq') result = await recentUniqActivity(url.searchParams.get('limit'));
+    else if (mode === 'account') result = await account(url.searchParams.get('name') || '');
+    else if (mode === 'block') result = await block(url.searchParams.get('id') || '');
+    else if (mode === 'transaction') result = await transaction(url.searchParams.get('id') || '');
+    else if (mode === 'search') result = await search(url.searchParams.get('q') || '');
+    else throw new Error('Unknown explorer mode.');
+
+    return {
+      ok: true,
+      source: 'live',
+      mode,
+      network: 'Ultra Testnet',
+      expectedChainId: CHAIN_ID,
+      fetchedAt: new Date().toISOString(),
+      ...result
+    };
+  }
+
+  window.UltraLiteAPI = {
+    CHAIN_ID,
+    CHAIN,
+    HYPERION,
+    getHealthSnapshot: () => [...healthState.values()]
+  };
+
   window.fetch = async (input, init) => {
     const raw = typeof input === 'string' ? input : input?.url;
     const url = new URL(raw, location.href);
-    if (url.origin !== location.origin || url.pathname !== '/api/ultra') return nativeFetch(input, init);
+    if (url.origin !== location.origin || url.pathname !== '/api/ultra') {
+      return nativeFetch(input, init);
+    }
 
+    const key = cacheKey(url);
     try {
-      const mode = url.searchParams.get('mode') || 'info';
-      let result;
-      if (mode === 'info') result = await info();
-      else if (mode === 'recent') result = await recent(url.searchParams.get('count'));
-      else if (mode === 'account') result = await account(url.searchParams.get('name') || '');
-      else if (mode === 'block') result = await block(url.searchParams.get('id') || '');
-      else if (mode === 'transaction') result = await transaction(url.searchParams.get('id') || '');
-      else if (mode === 'search') result = await search(url.searchParams.get('q') || '');
-      else return reply({ok:false,error:'Unknown mode'},400);
-      return reply({ok:true, mode, network:'Ultra Testnet', expectedChainId:CHAIN_ID, ...result});
-    } catch (e) {
-      return reply({ok:false,error:e.message || 'Ultra request failed', failures:e.failures},502);
+      const body = await dispatch(url);
+      if (body.mode !== 'health') writeCache(key, body);
+      return reply(body);
+    } catch (error) {
+      const cached = readCache(key);
+      if (cached?.body) {
+        return reply({
+          ...cached.body,
+          ok: true,
+          source: 'cache',
+          degraded: true,
+          cachedAt: new Date(cached.savedAt).toISOString(),
+          liveError: error.message,
+          failures: error.failures || undefined
+        });
+      }
+      return reply({
+        ok: false,
+        source: 'error',
+        error: error.message || 'Ultra request failed',
+        failures: error.failures || undefined
+      }, 502);
     }
   };
 })();

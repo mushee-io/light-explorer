@@ -14,19 +14,17 @@ A lightweight, read-only community explorer for **Ultra Testnet (Staging)**.
 - No wallet, signing, database or paid infrastructure required
 - Deployable directly to Vercel
 
-## Run locally
+## Architecture
 
-Requires Node.js 18+.
+The frontend (`index.html`, `app.js`, and `styles.css`) is served as static content on Vercel.
 
-```bash
-npm run dev
-```
+Only `/api/ultra.js` is deployed as a Vercel Function. It proxies public Ultra APIs server-side and automatically tries another public endpoint if one is unavailable.
 
-Then open `http://localhost:3000`.
+There is intentionally no root `server.js`; keeping a custom Node server at the project root can cause Vercel to treat the entire site as a Node application instead of a static site.
 
 ## Deploy to Vercel
 
-Import this folder/repository into Vercel. There are no environment variables and no dependency install is required. The `/api/ultra.js` function proxies public Ultra APIs server-side and automatically tries another public endpoint if one is unavailable.
+Import this repository into Vercel with the default project settings. There are no required environment variables and no application build step.
 
 ## Network
 

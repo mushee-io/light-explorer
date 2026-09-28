@@ -434,3 +434,14 @@ footer strong { color:var(--text); }
 @media (max-width: 800px) {
   .holdings-grid, .uniq-grid { grid-template-columns:1fr; }
 }
+
+
+/* Ultra brand mark */
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  display: block;
+  border-radius: 10px;
+  object-fit: cover;
+  flex: 0 0 auto;
+}

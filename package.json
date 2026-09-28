@@ -1,0 +1,13 @@
+{
+  "name": "ultra-lite-explorer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Community-built lightweight explorer for Ultra Testnet",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

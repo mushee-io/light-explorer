@@ -1,0 +1,32 @@
+name: Verify Explorer
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check browser JavaScript syntax
+        run: |
+          node --check app.js
+          node --check direct-api.js
+          node --check sw.js
+      - name: Verify static production architecture
+        run: |
+          test -f index.html
+          test -f styles.css
+          test -f app.js
+          test -f direct-api.js
+          test -f sw.js
+          test ! -f server.js
+          test ! -d api
+          grep -q 'direct-api.js' index.html
+          grep -q 'app.js' index.html
+          grep -q '"framework": null' vercel.json

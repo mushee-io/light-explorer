@@ -244,9 +244,35 @@ function renderHome(payload) {
     renderProducers(data.producers || []) + '</div>';
 }
 
+function renderTokenHoldings(tokens=[]) {
+  if (!tokens.length) return '<div class="empty compact">No indexed token balances returned.</div>';
+  return '<div class="holding-list">' + tokens.slice(0,24).map(token => {
+    const amount = token.amount ?? token.balance ?? token.quantity ?? '—';
+    const symbol = token.symbol || '';
+    const contract = token.contract || token.code || 'token contract';
+    return '<div class="holding-row"><div class="holding-mark">' + esc(String(symbol || '?').slice(0,1)) +
+      '</div><div><strong>' + esc(String(amount) + (symbol ? ' ' + symbol : '')) +
+      '</strong><small>' + esc(contract) + '</small></div></div>';
+  }).join('') + '</div>';
+}
+
+function renderOwnedUniqs(uniqs=[], hasMore=false) {
+  if (!uniqs.length) return '<div class="empty compact">No Uniqs found in token.b for this account.</div>';
+  return '<div class="uniq-grid">' + uniqs.slice(0,24).map(uniq => {
+    const id = uniq.id ?? '—';
+    const factory = uniq.token_factory_id ?? '—';
+    const serial = uniq.serial_number ?? '—';
+    return '<div class="uniq-card"><div class="uniq-symbol">◇</div><div><strong>Uniq #' +
+      esc(id) + '</strong><small>Factory ' + esc(factory) + ' · Serial ' + esc(serial) +
+      '</small></div></div>';
+  }).join('') + (hasMore ? '<div class="uniq-more">More Uniqs exist on-chain; first 100 loaded.</div>' : '') + '</div>';
+}
+
 function renderAccount(payload) {
   const a = payload.data?.account || {};
   const actions = payload.data?.actions || [];
+  const tokens = payload.data?.tokens || [];
+  const uniqs = payload.data?.uniqs || [];
   const ramQ = Number(a.ram_quota);
   const ramU = Number(a.ram_usage);
 
@@ -284,6 +310,10 @@ function renderAccount(payload) {
         '</span></div><div class="kv"><span>Accounts</span><span>' + num(p.required_auth?.accounts?.length || 0) +
         '</span></div></div>').join('') || '<p>No permissions returned.</p>') +
       '</div>' +
+      '<div class="card detail-card full"><div class="card-head inline-head"><div><div class="eyebrow">ASSETS</div><h2>On-chain holdings</h2></div><span class="subtle">' +
+      tokens.length + ' token balances · ' + uniqs.length + (payload.data?.uniq_more ? '+' : '') + ' Uniqs</span></div>' +
+      '<div class="holdings-grid"><div><div class="holdings-label">Tokens</div>' + renderTokenHoldings(tokens) +
+      '</div><div><div class="holdings-label">Uniqs</div>' + renderOwnedUniqs(uniqs, payload.data?.uniq_more) + '</div></div></div>' +
       '<div class="card detail-card full"><div class="card-head inline-head"><div><div class="eyebrow">HYPERION</div><h2>Recent actions</h2></div><span class="subtle">Last ' +
       actions.length + '</span></div>' +
       (actions.length ? actions.map(actionView).join('') :

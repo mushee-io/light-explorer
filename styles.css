@@ -346,3 +346,91 @@ footer strong { color:var(--text); }
   }
   .degraded-banner { align-items:flex-start; flex-direction:column; gap:4px; }
 }
+
+
+/* Account holdings */
+.holdings-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:18px;
+}
+.holdings-label {
+  margin-bottom:9px;
+  color:var(--muted);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.09em;
+  text-transform:uppercase;
+}
+.holding-list {
+  display:grid;
+  gap:8px;
+}
+.holding-row {
+  display:grid;
+  grid-template-columns:34px minmax(0,1fr);
+  gap:10px;
+  align-items:center;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--surface-2);
+}
+.holding-mark {
+  width:32px;
+  height:32px;
+  display:grid;
+  place-items:center;
+  border-radius:9px;
+  background:var(--purple-soft);
+  color:var(--purple-dark);
+  font-size:11px;
+  font-weight:900;
+}
+.holding-row strong, .uniq-card strong {
+  display:block;
+  font-size:11px;
+  overflow-wrap:anywhere;
+}
+.holding-row small, .uniq-card small {
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  font-size:9px;
+  overflow-wrap:anywhere;
+}
+.uniq-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.uniq-card {
+  display:grid;
+  grid-template-columns:34px minmax(0,1fr);
+  gap:10px;
+  align-items:center;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--surface-2);
+}
+.uniq-symbol {
+  width:32px;
+  height:32px;
+  display:grid;
+  place-items:center;
+  border-radius:9px;
+  background:#f1f0f2;
+  color:#34303a;
+  font-size:17px;
+}
+.uniq-more {
+  grid-column:1/-1;
+  color:var(--muted);
+  font-size:9px;
+  padding:4px 2px;
+}
+
+@media (max-width: 800px) {
+  .holdings-grid, .uniq-grid { grid-template-columns:1fr; }
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="description" content="A lightweight community explorer for Ultra Testnet." />
+  <title>Ultra Lite Explorer — Testnet</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#/" aria-label="Ultra Lite Explorer home">
+        <span class="brand-mark">U</span>
+        <span><strong>Ultra</strong><em>Lite Explorer</em></span>
+      </a>
+      <div class="top-actions">
+        <span class="network-pill"><span class="dot"></span> Testnet</span>
+        <button class="icon-button" id="statusButton" aria-label="API status">API</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" id="hero">
+        <div class="eyebrow">ULTRA BLOCKCHAIN · STAGING NETWORK</div>
+        <h1>Explore Ultra.<br><span>Without the weight.</span></h1>
+        <p>Search accounts, transactions and blocks across Ultra Testnet from one lightweight interface.</p>
+        <form id="searchForm" class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+          <input id="searchInput" autocomplete="off" placeholder="Account, transaction ID or block number" aria-label="Search Ultra Testnet" />
+          <button type="submit">Search</button>
+        </form>
+        <div class="search-hints"><span>Try an account like <button data-search="ultra">ultra</button></span><span>or enter a block number</span></div>
+      </section>
+
+      <section id="content" class="content" aria-live="polite"></section>
+    </main>
+
+    <footer>
+      <div><strong>Ultra Lite Explorer</strong><span>Community-built lightweight Ultra Testnet explorer.</span></div>
+      <div class="footer-right"><span id="footerEndpoint">Connecting…</span><a href="https://developers.ultra.io/products/chain-api/" target="_blank" rel="noreferrer">Ultra API Docs ↗</a></div>
+    </footer>
+  </div>
+
+  <aside id="statusDrawer" class="drawer" aria-hidden="true">
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <div class="drawer-panel">
+      <div class="drawer-head"><div><div class="eyebrow">NETWORK</div><h2>API status</h2></div><button class="close" data-close-drawer>×</button></div>
+      <div id="drawerContent"></div>
+    </div>
+  </aside>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

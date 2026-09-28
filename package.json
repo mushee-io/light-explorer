@@ -1,9 +1,0 @@
-{
-  "name": "ultra-lite-explorer",
-  "version": "1.0.1",
-  "private": true,
-  "description": "Community-built lightweight explorer for Ultra Testnet",
-  "engines": {
-    "node": "24.x"
-  }
-}
